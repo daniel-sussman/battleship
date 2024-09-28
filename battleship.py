@@ -2,7 +2,8 @@ from pynput import keyboard
 import os, string, copy, random
 
 class Game():
-    def __init__(self):
+    def __init__(self, handler):
+        self.handler = handler
         self.view = View(self)
         self.gridsize = 10
         self.target_grid = Grid(self, '~')
@@ -29,21 +30,20 @@ class Game():
         else:
             return False
 
-    def handle_space(self):
-        if self.active_grid == self.own_grid:
-            self.active_grid.place_ship(self.menu_options[self.selector_index])
-            self.view.display()
-        else:
-            self.ephemeral = self.target_grid.take_a_shot('You')
-            if not any(self.target_grid.ships_afloat()):
-                self.you_win()
-            self.view.display()
-            self.opponent_turn()
-
-    def handle_tab(self):
-        if self.active_grid == self.own_grid:
-            self.active_grid.rotate_cursor()
+    def rotate_cursor(self):
+        self.active_grid.rotate_cursor()
         self.view.display()
+
+    def place_ship(self):
+        self.active_grid.place_ship(self.menu_options[self.selector_index])
+        self.view.display()
+
+    def player_shoots(self):
+        self.ephemeral = self.target_grid.take_a_shot('You')
+        if not any(self.target_grid.ships_afloat()):
+            self.you_win()
+        self.view.display()
+        self.handler.pause_handler(self.opponent_turn)
 
     def generate_ships(self):
         self.own_grid.generate_ships()
@@ -54,16 +54,14 @@ class Game():
             self.do_battle()
 
     def place_ships(self):
-        self.active_grid = self.own_grid
-        self.active_grid.activate('placement')
+        self.own_grid.activate('placement')
         self.message = 'Place your ships!'
         self.menu_options = list(self.active_grid.ships.keys())
         self.view.display()
 
     def do_battle(self):
-        self.active_grid = self.target_grid
         self.own_grid.deactivate()
-        self.active_grid.activate('battle')
+        self.target_grid.activate('battle')
         self.enemy = Enemy(self.own_grid.grid)
         self.message = 'Battle!'
         self.view.display()
@@ -121,6 +119,7 @@ class Grid():
         return [ship for (ship, arr) in self.ships.items() if any(c for c in arr if c[2] == False)]
     
     def activate(self, mode):
+        self.game.active_grid = self
         if mode == 'placement':
             self.cursor = [[0], [0, 1, 2, 3, 4]]
         else:
@@ -222,7 +221,7 @@ class Grid():
                 return "You've already targeted that cell."
 
         hit = False
-        sunk = False
+        sunk = None
         for ship in self.ships_afloat():
             for cell in self.ships[ship]:
                 if target == (cell[0], cell[1]):
@@ -235,7 +234,7 @@ class Grid():
         self.grid[target[1]][target[0]] = 'X' if hit else miss
         ephemeral = 'A direct hit!' if hit else f'{player} missed!'
         if sunk:
-            ephemeral += f" {player} sank the enemy's {sunk}!" if player == 'You' else f"{player} sank your {sunk}!"
+            ephemeral += f" {player} sank the enemy's {sunk}!" if player == 'You' else f" {player} sank your {sunk}!"
         return ephemeral
 
     def _safely_increase_cursor_size(self, d, incr):
@@ -312,8 +311,49 @@ class View():
         return " -> " + option if self.game.selector_index == i else "    " + option
 
 
+class KeyboardHandler():
+    def __init__(self):
+        self.game = Game(self)
+        self.pause = False
+        self.paused_function = None
+
+    def pause_handler(self, function):
+        self.paused_function = function
+        self.pause = True
+        print('\nPress space or enter to continue.')
+
+    def handle_space(self):
+        if self.pause:
+            self.pause = False
+            return self.paused_function()
+        
+        if self.game.active_grid == self.game.own_grid:
+            self.game.place_ship()
+        else:
+            self.game.player_shoots()
+
+    def handle_tab(self):
+        if self.pause:
+            return
+        if self.game.active_grid == self.game.own_grid:
+            self.game.rotate_cursor()
+
+    def move_cursor(self, dir):
+        if self.pause:
+            return
+        self.game.move_cursor(dir)
+
+    def move_selector(self, incr):
+        if self.pause:
+            return
+        if any(self.game.menu_options):
+            self.game.move_selector(incr)
+
+
 def on_press(key, handler):
     if key == keyboard.Key.space:
+        handler.handle_space()
+    elif key == keyboard.Key.enter:
         handler.handle_space()
     elif key == keyboard.Key.tab:
         handler.handle_tab()
@@ -334,11 +374,8 @@ def on_release(key):
     if key == keyboard.Key.esc:
         os.system('clear')
         return False
-    
-def exit_program():
-    return False
 
-handler = Game()
+handler = KeyboardHandler()
 
 with keyboard.Listener(
     on_press=lambda key: on_press(key, handler),
