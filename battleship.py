@@ -39,11 +39,12 @@ class Game():
         self.view.display()
 
     def player_shoots(self):
-        self.ephemeral = self.target_grid.take_a_shot('You')
+        outcome = self.target_grid.take_a_shot('You')
         if not any(self.target_grid.ships_afloat()):
-            self.you_win()
+            self.game_over('You are victorious!')
         self.view.display()
-        self.handler.pause_handler(self.opponent_turn)
+        if outcome:
+            self.handler.pause_handler(self.opponent_turn)
 
     def generate_ships(self):
         self.own_grid.generate_ships()
@@ -67,11 +68,13 @@ class Game():
         self.view.display()
 
     def opponent_turn(self):
-        self.ephemeral = self.own_grid.take_a_shot('The enemy', self.enemy.calculate())
+        self.own_grid.take_a_shot('The enemy', self.enemy.calculate())
+        if not any(self.own_grid.ships_afloat()):
+            self.game_over('Your fleet was annihilated.')
         self.view.display()
     
-    def you_win(self):
-        self.message = 'You are victorious!'
+    def game_over(self, message):
+        self.message = message
         self.view.display()
         raise(keyboard.Listener.StopException)
 
@@ -218,7 +221,8 @@ class Grid():
             target = (self.cursor[0][0], self.cursor[1][0])
             miss = ' '
             if self.grid[target[1]][target[0]] == 'X' or self.grid[target[1]][target[0]] == ' ':
-                return "You've already targeted that cell."
+                self.game.ephemeral = "You've already targeted that cell."
+                return False
 
         hit = False
         sunk = None
@@ -235,7 +239,8 @@ class Grid():
         ephemeral = 'A direct hit!' if hit else f'{player} missed!'
         if sunk:
             ephemeral += f" {player} sank the enemy's {sunk}!" if player == 'You' else f" {player} sank your {sunk}!"
-        return ephemeral
+        self.game.ephemeral = ephemeral
+        return True
 
     def _safely_increase_cursor_size(self, d, incr):
         old_position = copy.deepcopy(self.cursor)
