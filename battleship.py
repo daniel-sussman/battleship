@@ -63,14 +63,18 @@ class Game():
     def do_battle(self):
         self.own_grid.deactivate()
         self.target_grid.activate('battle')
-        self.enemy = Enemy(self.own_grid.grid)
+        self.enemy = Enemy(self.own_grid.grid, self.gridsize)
         self.message = 'Battle!'
         self.view.display()
 
     def opponent_turn(self):
-        self.own_grid.take_a_shot('The enemy', self.enemy.calculate())
-        if not any(self.own_grid.ships_afloat()):
-            self.game_over('Your fleet was annihilated.')
+        target, hit, sunk = self.own_grid.take_a_shot('The enemy', self.enemy.calculate())
+        if sunk:
+            self.enemy.targets.pop(0)
+            if not any(self.own_grid.ships_afloat()):
+                self.game_over('Your fleet was annihilated.')
+        elif hit:
+            self.enemy.targets[0].append(target) if any(self.enemy.targets) else self.enemy.targets.append([target])
         self.view.display()
     
     def game_over(self, message):
@@ -80,22 +84,50 @@ class Game():
 
 
 class Enemy():
-    def __init__(self, target_grid):
+    def __init__(self, target_grid, gridsize):
         self.target_grid = target_grid
-        self.target = None
+        self.gridsize = gridsize
+        self.targets = []
 
     def calculate(self):
-        if not self.target:
-            return self._fire_randomly()
+        return self._fire_on_target(next(iter(self.targets))) if any(self.targets) else self._fire_randomly()
     
+    def _fire_on_target(self, target):
+        return random.choice(self._fetch_possible_shots(target))
+
+    def _fetch_possible_shots(self, target):
+        print(f"targets: {self.targets}")
+        if len(target) == 1:
+            x, y = target[0]
+            return [(a, b) for (a, b) in [(x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1)] if a >= 0 and a < self.gridsize and b >= 0 and b < self.gridsize and self._cell_untried(a, b)]
+        elif target[0][0] == target[-1][0]: # ship aligned to y-axis
+            x1, y1 = min(target, key=lambda cell: cell[1])
+            x2, y2 = max(target, key=lambda cell: cell[1])
+            return [(a, b) for (a, b) in [(x1, y1 - 1), (x2, y2 + 1)] if b >= 0 and b < self.gridsize and self._cell_untried(a, b)]
+        elif target[0][1] == target[-1][1]: # ship aligned to x-axis
+            x1, y1 = min(target, key=lambda cell: cell[0])
+            x2, y2 = max(target, key=lambda cell: cell[0])
+            return [(a, b) for (a, b) in [(x1 - 1, y1), (x2 + 1, y2)] if a >= 0 and a < self.gridsize and self._cell_untried(a, b)]
+        else:
+            self.split_targets(target)
+            return self.calculate
+
+    def split_targets(self, target):
+        new_targets = [[t] for t in target]
+        self.targets.remove(target)
+        self.targets = new_targets.extend(self.targets)
+
     def _fire_randomly(self):
         coordinates_valid = False
         while not coordinates_valid:
             x = random.randint(0, len(self.target_grid) - 1)
             y = random.randint(0, len(self.target_grid) - 1)
-            if not self.target_grid[y][x] in ['X', '•']:
-                coordinates_valid = True
+            coordinates_valid = self._cell_untried(x, y)
         return (x, y)
+
+    def _cell_untried(self, x, y):
+        return not self.target_grid[y][x] in ['X', '•']
+
 
 class Grid():
     def __init__(self, game, char):
@@ -240,7 +272,7 @@ class Grid():
         if sunk:
             ephemeral += f" {player} sank the enemy's {sunk}!" if player == 'You' else f" {player} sank your {sunk}!"
         self.game.ephemeral = ephemeral
-        return True
+        return [target, hit, sunk]
 
     def _safely_increase_cursor_size(self, d, incr):
         old_position = copy.deepcopy(self.cursor)
@@ -275,14 +307,6 @@ class Grid():
             return False
         else:
             return True
-        
-    def reveal_all_ships(self):
-        for ship in self.ships:
-            for cell in self.ships[ship]:
-                if cell[2]:
-                    self.grid[cell[1]][cell[0]] = 'X'
-                else:
-                    self.grid[cell[1]][cell[0]] = 'O'
 
 
 class View():
